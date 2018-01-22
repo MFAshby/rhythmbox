@@ -126,6 +126,11 @@ RhythmDBEntryType *rhythmdb_get_song_entry_type          (void);
 RhythmDBEntryType *rhythmdb_get_error_entry_type	 (void);
 RhythmDBEntryType *rhythmdb_get_ignore_entry_type        (void);
 
+// MFA define auto-ptr cleanup so I can inherit from this using the most 
+// convenient macros
+void rhythmdb_entry_type_autoptr_cleanup(RhythmDBEntryType*);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(RhythmDBEntryType, rhythmdb_entry_type_autoptr_cleanup);
+
 G_END_DECLS
 
 #endif

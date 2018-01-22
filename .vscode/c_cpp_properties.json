@@ -1,0 +1,107 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "includePath": [
+                "/usr/include",
+                "/usr/local/include",
+                "${workspaceRoot}"
+            ],
+            "defines": [],
+            "intelliSenseMode": "clang-x64",
+            "browse": {
+                "path": [
+                    "/usr/include",
+                    "/usr/local/include",
+                    "${workspaceRoot}"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            },
+            "macFrameworkPath": [
+                "/System/Library/Frameworks",
+                "/Library/Frameworks"
+            ]
+        },
+        {
+            "name": "Linux",
+            "includePath": [
+                "/usr/include/c++/6",
+                "/usr/include/x86_64-linux-gnu/c++/6",
+                "/usr/include/c++/6/backward",
+                "/usr/lib/gcc/x86_64-linux-gnu/6/include",
+                "/usr/local/include",
+                "/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed",
+                "/usr/include/x86_64-linux-gnu",
+                "/usr/include",
+                "/usr/include/lirc",
+                "/usr/include/gstreamer-1.0",
+                "${workspaceRoot}",
+                "${workspaceRoot}/backends",
+                "${workspaceRoot}/rhythmdb",
+                "${workspaceRoot}/backends/gstreamer",
+                "/usr/include/libxml2",
+                "/usr/include/glib-2.0",
+                "/usr/lib/x86_64-linux-gnu/glib-2.0/include/",
+                "/usr/include/gdk-pixbuf-2.0",
+                "/usr/include/gtk-3.0",
+                "${workspaceRoot}/widgets",
+                "${workspaceRoot}/lib",
+                "/usr/include/totem-pl-parser/1/plparser",
+                "${workspaceRoot}/metadata",
+                "${workspaceRoot}/sources",
+                "${workspaceRoot}/podcast",
+                "/usr/include/pango-1.0",
+                "/usr/include/cairo",
+                "/usr/include/atk-1.0",
+                "${workspaceRoot}/plugins",
+                "${workspaceRoot}/shell",
+                "/usr/include/libpeas-1.0",
+                "/usr/include/gobject-introspection-1.0",
+                "/usr/include/deezer",
+                "/usr/include/webkitgtk-4.0",
+                "/usr/include/libsoup-2.4",
+                "/usr/include/json-glib-1.0"
+            ],
+            "defines": [],
+            "intelliSenseMode": "clang-x64",
+            "browse": {
+                "path": [
+                    "/usr/include/c++/6",
+                    "/usr/include/x86_64-linux-gnu/c++/6",
+                    "/usr/include/c++/6/backward",
+                    "/usr/lib/gcc/x86_64-linux-gnu/6/include",
+                    "/usr/local/include",
+                    "/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed",
+                    "/usr/include/x86_64-linux-gnu",
+                    "/usr/include",
+                    "${workspaceRoot}",
+                    "/usr/include/glib-2.0"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            }
+        },
+        {
+            "name": "Win32",
+            "includePath": [
+                "C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/include",
+                "${workspaceRoot}"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE"
+            ],
+            "intelliSenseMode": "msvc-x64",
+            "browse": {
+                "path": [
+                    "C:/Program Files (x86)/Microsoft Visual Studio 14.0/VC/include/*",
+                    "${workspaceRoot}"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            }
+        }
+    ],
+    "version": 3
+}

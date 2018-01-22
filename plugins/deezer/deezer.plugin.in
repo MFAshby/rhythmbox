@@ -1,0 +1,8 @@
+[Plugin]
+Module=deezerpl
+IAge=2
+_Name=Deezer
+_Description=A plugin to play music from Deezer
+Authors=Martin Ashby <martin@ashbysoft.com>
+Copyright=Copyright © 2018 Martin Ashby
+Website=https://mfashby.net

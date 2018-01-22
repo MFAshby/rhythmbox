@@ -169,7 +169,12 @@ static void rb_shell_player_volume_changed_cb (RBPlayer *player,
 					       float volume,
 					       RBShellPlayer *shell_player);
 
+static void rb_shell_player_switch_players(RBShellPlayer *player,
+							 RhythmDBEntry *entry);
 
+static void 
+rb_shell_player_signal_connect_player(RBShellPlayer *shell_player, 
+									  RBPlayer *player);
 
 typedef struct {
 	/* Value of the state/play-order setting */
@@ -208,7 +213,9 @@ struct RBShellPlayerPrivate
 
 	gboolean handling_error;
 
-	RBPlayer *mmplayer;
+	RBPlayer *active_player;
+	RBPlayer *default_player;
+	GHashTable *custom_players; /* RhythmDBEntryType* -> RBPlayer* */
 
 	guint elapsed;
 	gint64 track_transition_time;
@@ -318,7 +325,7 @@ reemit_playing_signal (RBShellPlayer *player,
 		       gpointer data)
 {
 	g_signal_emit (player, rb_shell_player_signals[PLAYING_CHANGED], 0,
-		       rb_player_playing (player->priv->mmplayer));
+		       rb_player_playing (player->priv->active_player));
 }
 
 static void
@@ -330,13 +337,17 @@ rb_shell_player_open_playlist_url (RBShellPlayer *player,
 	GError *error = NULL;
 
 	rb_debug ("playing stream url %s", location);
-	rb_player_open (player->priv->mmplayer,
+
+	// Check if we've got a custom player supplied for this entry
+	rb_shell_player_switch_players(player, entry);
+
+	rb_player_open (player->priv->active_player,
 			location,
 			rhythmdb_entry_ref (entry),
 			(GDestroyNotify) rhythmdb_entry_unref,
 			&error);
 	if (error == NULL)
-		rb_player_play (player->priv->mmplayer, play_type, player->priv->track_transition_time, &error);
+		rb_player_play (player->priv->active_player, play_type, player->priv->track_transition_time, &error);
 
 	if (error) {
 		rb_shell_player_error_idle (player, TRUE, error);
@@ -521,7 +532,7 @@ rb_shell_player_handle_redirect (RBPlayer *player,
 	rb_debug ("redirect to %s", uri);
 
 	/* Stop existing stream */
-	rb_player_close (shell_player->priv->mmplayer, NULL, NULL);
+	rb_player_close (shell_player->priv->active_player, NULL, NULL);
 
 	/* Update entry */
 	g_value_init (&val, G_TYPE_STRING);
@@ -755,9 +766,10 @@ rb_shell_player_open_location (RBShellPlayer *player,
 		}
 
 		rhythmdb_entry_ref (entry);
-		ret = ret && rb_player_open (player->priv->mmplayer, location, entry, (GDestroyNotify) rhythmdb_entry_unref, error);
 
-		ret = ret && rb_player_play (player->priv->mmplayer, play_type, player->priv->track_transition_time, error);
+		rb_shell_player_switch_players(player, entry);
+		ret = ret && rb_player_open (player->priv->active_player, location, entry, (GDestroyNotify) rhythmdb_entry_unref, error);
+		ret = ret && rb_player_play (player->priv->active_player, play_type, player->priv->track_transition_time, error);
 	}
 
 	g_free (location);
@@ -789,7 +801,7 @@ rb_shell_player_play (RBShellPlayer *player,
 		return FALSE;
 	}
 
-	if (rb_player_playing (player->priv->mmplayer))
+	if (rb_player_playing (player->priv->active_player))
 		return TRUE;
 
 	if (player->priv->parser_cancellable != NULL) {
@@ -798,7 +810,7 @@ rb_shell_player_play (RBShellPlayer *player,
 	}
 
 	/* we're obviously not playing anything, so crossfading is irrelevant */
-	if (!rb_player_play (player->priv->mmplayer, RB_PLAYER_PLAY_REPLACE, 0.0f, error)) {
+	if (!rb_player_play (player->priv->active_player, RB_PLAYER_PLAY_REPLACE, 0.0f, error)) {
 		rb_debug ("player doesn't want to");
 		return FALSE;
 	}
@@ -887,7 +899,7 @@ rb_shell_player_set_playing_entry (RBShellPlayer *player,
 	return TRUE;
  lose:
 	/* Ignore errors, shutdown the player */
-	rb_player_close (player->priv->mmplayer, NULL /* XXX specify uri? */, NULL);
+	rb_player_close (player->priv->active_player, NULL /* XXX specify uri? */, NULL);
 
 	if (tmp_error == NULL) {
 		tmp_error = g_error_new (RB_SHELL_PLAYER_ERROR,
@@ -1115,9 +1127,9 @@ rb_shell_player_do_previous (RBShellPlayer *player,
 	 */
 	if (player->priv->current_playing_source != NULL
 	    && rb_source_can_pause (player->priv->source)
-	    && rb_player_get_time (player->priv->mmplayer) > (G_GINT64_CONSTANT (3) * RB_PLAYER_SECOND)) {
+	    && rb_player_get_time (player->priv->active_player) > (G_GINT64_CONSTANT (3) * RB_PLAYER_SECOND)) {
 		rb_debug ("after 3 second previous, restarting song");
-		rb_player_set_time (player->priv->mmplayer, 0);
+		rb_player_set_time (player->priv->active_player, 0);
 		rb_shell_player_sync_with_source (player);
 		return TRUE;
 	}
@@ -1352,7 +1364,7 @@ rb_shell_player_playpause (RBShellPlayer *player,
 
 	ret = TRUE;
 
-	if (rb_player_playing (player->priv->mmplayer)) {
+	if (rb_player_playing (player->priv->active_player)) {
 		if (player->priv->source == NULL) {
 			rb_debug ("playing source is already NULL");
 		} else if (rb_source_can_pause (player->priv->source)) {
@@ -1361,7 +1373,7 @@ rb_shell_player_playpause (RBShellPlayer *player,
 				g_object_unref (player->priv->parser_cancellable);
 				player->priv->parser_cancellable = NULL;
 			}
-			rb_player_pause (player->priv->mmplayer);
+			rb_player_pause (player->priv->active_player);
 			songs = rb_source_get_entry_view (player->priv->current_playing_source);
 			if (songs)
 				rb_entry_view_set_state (songs, RB_ENTRY_VIEW_PAUSED);
@@ -1497,7 +1509,7 @@ rb_shell_player_sync_volume (RBShellPlayer *player,
 	}
 
 	if (set_volume) {
-		rb_player_set_volume (player->priv->mmplayer,
+		rb_player_set_volume (player->priv->active_player,
 				      player->priv->mute ? 0.0 : player->priv->volume);
 	}
 
@@ -1930,7 +1942,7 @@ rb_shell_player_sync_with_source (RBShellPlayer *player)
 		title = g_string_free (title_str, FALSE);
 	}
 
-	elapsed = rb_player_get_time (player->priv->mmplayer);
+	elapsed = rb_player_get_time (player->priv->active_player);
 	if (elapsed < 0)
 		elapsed = 0;
 	player->priv->elapsed = elapsed / RB_PLAYER_SECOND;
@@ -1959,7 +1971,7 @@ rb_shell_player_sync_buttons (RBShellPlayer *player)
 	entry = rb_shell_player_get_playing_entry (player);
 	if (entry != NULL) {
 		source = player->priv->current_playing_source;
-		entry_view_state = rb_player_playing (player->priv->mmplayer) ?
+		entry_view_state = rb_player_playing (player->priv->active_player) ?
 			RB_ENTRY_VIEW_PLAYING : RB_ENTRY_VIEW_PAUSED;
 	} else {
 		source = player->priv->selected_source;
@@ -2118,7 +2130,7 @@ rb_shell_player_stop (RBShellPlayer *player)
 	g_return_if_fail (RB_IS_SHELL_PLAYER (player));
 
 	if (error == NULL)
-		rb_player_close (player->priv->mmplayer, NULL, &error);
+		rb_player_close (player->priv->active_player, NULL, &error);
 	if (error) {
 		rb_error_dialog (NULL,
 				 _("Couldn't stop playback"),
@@ -2165,7 +2177,7 @@ gboolean
 rb_shell_player_pause (RBShellPlayer *player,
 		       GError **error)
 {
-	if (rb_player_playing (player->priv->mmplayer))
+	if (rb_player_playing (player->priv->active_player))
 		return rb_shell_player_playpause (player, error);
 	else
 		return TRUE;
@@ -2187,7 +2199,7 @@ rb_shell_player_get_playing (RBShellPlayer *player,
 			     GError **error)
 {
 	if (playing != NULL)
-		*playing = rb_player_playing (player->priv->mmplayer);
+		*playing = rb_player_playing (player->priv->active_player);
 
 	return TRUE;
 }
@@ -2230,7 +2242,7 @@ rb_shell_player_get_playing_time (RBShellPlayer *player,
 {
 	gint64 ptime;
 
-	ptime = rb_player_get_time (player->priv->mmplayer);
+	ptime = rb_player_get_time (player->priv->active_player);
 	if (ptime >= 0) {
 		if (time != NULL) {
 			*time = (guint)(ptime / RB_PLAYER_SECOND);
@@ -2261,12 +2273,12 @@ rb_shell_player_set_playing_time (RBShellPlayer *player,
 				  guint time,
 				  GError **error)
 {
-	if (rb_player_seekable (player->priv->mmplayer)) {
+	if (rb_player_seekable (player->priv->active_player)) {
 		if (player->priv->playing_entry_eos) {
 			rb_debug ("forgetting that playing entry had EOS'd due to seek");
 			player->priv->playing_entry_eos = FALSE;
 		}
-		rb_player_set_time (player->priv->mmplayer, ((gint64) time) * RB_PLAYER_SECOND);
+		rb_player_set_time (player->priv->active_player, ((gint64) time) * RB_PLAYER_SECOND);
 		return TRUE;
 	} else {
 		g_set_error (error,
@@ -2295,12 +2307,12 @@ rb_shell_player_seek (RBShellPlayer *player,
 {
 	g_return_val_if_fail (RB_IS_SHELL_PLAYER (player), FALSE);
 
-	if (rb_player_seekable (player->priv->mmplayer)) {
-		gint64 target_time = rb_player_get_time (player->priv->mmplayer) +
+	if (rb_player_seekable (player->priv->active_player)) {
+		gint64 target_time = rb_player_get_time (player->priv->active_player) +
 			(((gint64)offset) * RB_PLAYER_SECOND);
 		if (target_time < 0)
 			target_time = 0;
-		rb_player_set_time (player->priv->mmplayer, target_time);
+		rb_player_set_time (player->priv->active_player, target_time);
 		return TRUE;
 	} else {
 		g_set_error (error,
@@ -2687,7 +2699,7 @@ missing_plugins_cb (RBPlayer *player,
 
 		/* probably specify the URI here.. */
 		rb_debug ("stopping player while processing missing plugins");
-		rb_player_close (retry_data->player->priv->mmplayer, NULL, NULL);
+		rb_player_close (retry_data->player->priv->active_player, NULL, NULL);
 	} else {
 		rb_debug ("not processing missing plugins; simulating EOS");
 		rb_shell_player_handle_eos (NULL, NULL, FALSE, retry_data->player);
@@ -2943,6 +2955,53 @@ void
 rb_shell_player_remove_play_order (RBShellPlayer *player, const char *name)
 {
 	g_hash_table_remove (player->priv->play_orders, name);
+}
+
+/**
+ * rb_shell_player_add_custom_player
+ * @player: the #RBShellPlayer
+ * @entry_type: the #RhythmDBEntryType to be played with the new player
+ * @custom_player: the custom #RBPlayer to be installed
+ * 
+ * Allows plugins to define a different backend to be used for specific entries.
+ * 
+ * MFA
+ */
+void			
+rb_shell_player_add_custom_player(RBShellPlayer *player,
+								RhythmDBEntryType *entry_type,
+								RBPlayer *custom_player) {
+	g_object_ref(player);
+	g_hash_table_insert(player->priv->custom_players, entry_type, custom_player);
+	rb_shell_player_signal_connect_player(player, custom_player);
+}
+
+/**
+ * rb_shell_player_switch_players
+ * @player: the #RBShellPlayer
+ * @entry_type: the #RhythmDBEntryType about to be played
+ * 
+ * Switches the currently active RBPlayer instance for a custom implementation
+ * if required by entry
+ */ 
+static void 
+rb_shell_player_switch_players(RBShellPlayer *player,
+							 RhythmDBEntry *entry) {
+	RhythmDBEntryType *entry_type = rhythmdb_entry_get_entry_type(entry);
+	RBPlayer* player_switch = RB_PLAYER(g_hash_table_lookup(player->priv->custom_players, entry_type));
+	if (player_switch == NULL) {
+		player_switch = player->priv->default_player;
+	}
+
+	// No need to switch
+	if (player_switch == player->priv->active_player) {
+		rb_debug ("No need to switch players");
+		return;
+	}
+
+	rb_debug ("Switching players %p", player_switch);
+	// rb_player_close(player->priv->active_player, NULL, NULL);
+	player->priv->active_player = player_switch;
 }
 
 static void
@@ -3229,8 +3288,8 @@ rb_shell_player_get_property (GObject *object,
 		break;
 	}
 	case PROP_PLAYING:
-		if (player->priv->mmplayer != NULL)
-			g_value_set_boolean (value, rb_player_playing (player->priv->mmplayer));
+		if (player->priv->active_player != NULL)
+			g_value_set_boolean (value, rb_player_playing (player->priv->active_player));
 		else
 			g_value_set_boolean (value, FALSE);
 		break;
@@ -3250,7 +3309,8 @@ rb_shell_player_get_property (GObject *object,
 		g_value_set_boolean (value, player->priv->current_playing_source == RB_SOURCE (player->priv->queue_source));
 		break;
 	case PROP_PLAYER:
-		g_value_set_object (value, player->priv->mmplayer);
+		// Does anyone depend on this reference remaining the same forev?
+		g_value_set_object (value, player->priv->active_player); 
 		break;
 	case PROP_MUTE:
 		g_value_set_boolean (value, player->priv->mute);
@@ -3301,8 +3361,11 @@ rb_shell_player_init (RBShellPlayer *player)
 	rb_shell_player_add_play_order (player, "queue", N_("Linear, removing entries once played"),
 					RB_TYPE_QUEUE_PLAY_ORDER, TRUE);
 
-	player->priv->mmplayer = rb_player_new (g_settings_get_boolean (player->priv->settings, "use-xfade-backend"),
-					        &error);
+	player->priv->default_player = rb_player_new (g_settings_get_boolean (player->priv->settings, "use-xfade-backend"),
+					        		&error);
+	player->priv->active_player = player->priv->default_player;
+	player->priv->custom_players = g_hash_table_new(g_direct_hash, g_direct_equal);
+
 	if (error != NULL) {
 		GtkWidget *dialog;
 		dialog = gtk_message_dialog_new (NULL, GTK_DIALOG_MODAL,
@@ -3314,44 +3377,7 @@ rb_shell_player_init (RBShellPlayer *player)
 		exit (1);
 	}
 
-	g_signal_connect_object (player->priv->mmplayer,
-				 "eos",
-				 G_CALLBACK (rb_shell_player_handle_eos),
-				 player, 0);
-
-	g_signal_connect_object (player->priv->mmplayer,
-				 "redirect",
-				 G_CALLBACK (rb_shell_player_handle_redirect),
-				 player, 0);
-
-	g_signal_connect_object (player->priv->mmplayer,
-				 "tick",
-				 G_CALLBACK (tick_cb),
-				 player, 0);
-
-	g_signal_connect_object (player->priv->mmplayer,
-				 "error",
-				 G_CALLBACK (error_cb),
-				 player, 0);
-
-	g_signal_connect_object (player->priv->mmplayer,
-				 "playing-stream",
-				 G_CALLBACK (playing_stream_cb),
-				 player, 0);
-
-	g_signal_connect_object (player->priv->mmplayer,
-				 "missing-plugins",
-				 G_CALLBACK (missing_plugins_cb),
-				 player, 0);
-	g_signal_connect_object (player->priv->mmplayer,
-				 "volume-changed",
-				 G_CALLBACK (rb_shell_player_volume_changed_cb),
-				 player, 0);
-
-	g_signal_connect_object (player->priv->mmplayer,
-				 "image",
-				 G_CALLBACK (player_image_cb),
-				 player, 0);
+	rb_shell_player_signal_connect_player(player, player->priv->default_player);
 
 	{
 		GVolumeMonitor *monitor = g_volume_monitor_get ();
@@ -3366,6 +3392,57 @@ rb_shell_player_init (RBShellPlayer *player)
 
 	g_signal_connect (player, "notify::playing",
 			  G_CALLBACK (reemit_playing_signal), NULL);
+}
+
+/**
+ * rb_shell_player_signal_connect_player
+ * @shell_player: the #RBShellPlayer
+ * @player: the #RBPlayer instance to be connected
+ * 
+ * Connects signals emitted by an RBPlayer to this RBShellPlayer
+ */ 
+static void 
+rb_shell_player_signal_connect_player(RBShellPlayer *shell_player, 
+									  RBPlayer *player) {
+	g_signal_connect_object (player,
+				 "eos",
+				 G_CALLBACK (rb_shell_player_handle_eos),
+				 shell_player, 0);
+
+	g_signal_connect_object (player,
+				 "redirect",
+				 G_CALLBACK (rb_shell_player_handle_redirect),
+				 shell_player, 0);
+
+	g_signal_connect_object (player,
+				 "tick",
+				 G_CALLBACK (tick_cb),
+				 shell_player, 0);
+
+	g_signal_connect_object (player,
+				 "error",
+				 G_CALLBACK (error_cb),
+				 shell_player, 0);
+
+	g_signal_connect_object (player,
+				 "playing-stream",
+				 G_CALLBACK (playing_stream_cb),
+				 shell_player, 0);
+
+	g_signal_connect_object (player,
+				 "missing-plugins",
+				 G_CALLBACK (missing_plugins_cb),
+				 shell_player, 0);
+
+	g_signal_connect_object (player,
+				 "volume-changed",
+				 G_CALLBACK (rb_shell_player_volume_changed_cb),
+				 shell_player, 0);
+
+	g_signal_connect_object (player,
+				 "image",
+				 G_CALLBACK (player_image_cb),
+				 shell_player, 0);
 }
 
 static void
@@ -3395,9 +3472,14 @@ rb_shell_player_dispose (GObject *object)
 		player->priv->settings = NULL;
 	}
 
-	if (player->priv->mmplayer != NULL) {
-		g_object_unref (player->priv->mmplayer);
-		player->priv->mmplayer = NULL;
+	if (player->priv->default_player != NULL) {
+		g_object_unref (player->priv->default_player);
+		player->priv->default_player = NULL;
+	}
+
+	if (player->priv->custom_players != NULL) {
+		// MFA not sure if I need to unref all the players in here too???
+		g_hash_table_destroy (player->priv->custom_players);
 	}
 
 	if (player->priv->play_order != NULL) {

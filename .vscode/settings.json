@@ -1,0 +1,24 @@
+{
+    "files.associations": {
+        "rb-encoder.h": "c",
+        "rhythmdb.h": "c",
+        "rb-player.h": "c",
+        "glib-object.h": "c",
+        "gtk.h": "c",
+        "rb-property-view.h": "c",
+        "gi18n-lib.h": "c",
+        "glib.h": "c",
+        "galloca.h": "c",
+        "gtypes.h": "c",
+        "deezer-source.h": "c",
+        "rb-deezer-entry-type.h": "c",
+        "rhythmdb-entry-type.h": "c",
+        "rb-deezer-plugin.h": "c",
+        "deezer-api.h": "c",
+        "rb-deezer-source.h": "c",
+        "deezer-player.h": "c",
+        "deezer-connect.h": "c",
+        "deezer-track.h": "c",
+        "json-glib.h": "c"
+    }
+}

@@ -621,6 +621,23 @@ if test "x$enable_fm_radio" != xno; then
 fi
 AM_CONDITIONAL(ENABLE_FM_RADIO, test "x$enable_fm_radio" != xno)
 
+dnl ================================================================
+dnl Deezer
+dnl ================================================================
+AC_MSG_CHECKING([whether deezer support is requested])
+have_deezer=no
+AC_ARG_ENABLE([deezer],
+  AC_HELP_STRING([--disable-deezer],[Disable Deezer support]),,
+  enable_deezer=yes)
+if test "x$enable_deezer" != xno; then
+  PKG_CHECK_MODULES(DEEZER, [deezer,  webkit2gtk-4.0],
+		[have_deezer=yes], [have_deezer=no])
+  if test "x$have_deezer" = "xno" -a "x$enable_deezer" = "xyes"; then
+	AC_MSG_ERROR([Deezer plugin support explicitly requested, but library not found])
+  fi
+fi
+AM_CONDITIONAL(ENABLE_DEEZER, test "x$have_deezer" != xno)
+
 
 dnl check, for unit tests
 PKG_CHECK_MODULES(CHECK, check, have_check=yes, have_check=no)
@@ -758,6 +775,7 @@ plugins/notification/Makefile
 plugins/grilo/Makefile
 plugins/soundcloud/Makefile
 plugins/webremote/Makefile
+plugins/deezer/Makefile
 sample-plugins/Makefile
 sample-plugins/sample/Makefile
 sample-plugins/sample-python/Makefile
@@ -844,6 +862,12 @@ if test "x$enable_fm_radio" != xno; then
 	AC_MSG_NOTICE([** FM radio support enabled])
 else
 	AC_MSG_NOTICE([   FM radio support disabled])
+fi
+
+if test "x$have_deezer" != xno; then
+	AC_MSG_NOTICE([** Deezer support enabled])
+else
+	AC_MSG_NOTICE([   Deezer support disabled])
 fi
 
 if test "x$enable_browser_plugin" != xno; then

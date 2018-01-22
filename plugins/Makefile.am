@@ -64,3 +64,7 @@ endif
 if USE_GUDEV
 SUBDIRS += android
 endif
+
+if ENABLE_DEEZER
+SUBDIRS += deezer
+endif

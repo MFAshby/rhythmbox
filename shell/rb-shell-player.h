@@ -30,6 +30,7 @@
 
 #include <sources/rb-source.h>
 #include <rhythmdb/rhythmdb.h>
+#include <backends/rb-player.h>
 
 #ifndef __RB_SHELL_PLAYER_H
 #define __RB_SHELL_PLAYER_H
@@ -166,6 +167,10 @@ void			rb_shell_player_add_play_order (RBShellPlayer *player,
 							gboolean hidden);
 void			rb_shell_player_remove_play_order (RBShellPlayer *player,
 							   const char *name);
+
+void			rb_shell_player_add_custom_player(RBShellPlayer *player,
+								RhythmDBEntryType *entry_type,
+								RBPlayer *custom_player);
 
 G_END_DECLS
 

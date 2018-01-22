@@ -205,6 +205,11 @@ void		rb_source_bind_settings		(RBSource *source,
 						 gboolean sort_order);
 void		rb_source_notify_playback_status_changed (RBSource *source);
 
+// MFA define auto-ptr cleanup so I can inherit from this using the most 
+// convenient macros
+void rb_souce_autoptr_cleanup(RBSource*);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(RBSource, rb_souce_autoptr_cleanup);
+
 G_END_DECLS
 
 #endif /* __RB_SOURCE_H */
