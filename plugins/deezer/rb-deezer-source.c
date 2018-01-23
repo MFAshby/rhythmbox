@@ -11,6 +11,8 @@
 #include "rb-debug.h"
 #include "rb-shell.h"
 #include "rb-shell-player.h"
+#include "rb-util.h"
+#include "rb-source.h"
 #include "yuarel.h"
 
 enum {
@@ -74,9 +76,9 @@ static void rb_deezer_source_class_init(RBDeezerSourceClass* cls) {
     obj_class->set_property = rb_deezer_source_set_property;
     obj_class->get_property = rb_deezer_source_get_property;
 
-    // Populate some methods yo
+    // Override methods
     RBSourceClass* src_class = RB_SOURCE_CLASS(cls);
-    src_class->get_entry_view = get_entry_view;
+    src_class->get_entry_view = get_entry_view;    
 
     g_object_class_install_property(
         obj_class, 
@@ -94,7 +96,7 @@ static void rb_deezer_source_class_finalize(RBDeezerSourceClass* cls) {}
 G_DEFINE_DYNAMIC_TYPE(
     RBDeezerSource, 
     rb_deezer_source, 
-    rb_source_get_type()
+    RB_TYPE_SOURCE
 );
 
 void _rb_deezer_source_register_type(GTypeModule* type_module) {
@@ -198,19 +200,11 @@ static void rb_deezer_source_show_login(RBDeezerSource* deezer_source) {
     gtk_widget_show_all(GTK_WIDGET(deezer_source));
 }
 
-static void rb_deezer_source_set_track_component(JsonNode* root,
-                                                const char* json_path, 
+static void rb_deezer_source_set_track_component(JsonNode* node,
                                                 guint rhythmdb_prop,
                                                 RhythmDB* db,
                                                 RhythmDBEntry* entry) {
-    GError* err;
-    JsonNode* qr_result = json_path_query(json_path, root, &err);
-    if (qr_result == NULL) {
-        rb_debug("JSON error %s", err->message);
-        return;
-    }
     // Query always returns an array
-    JsonNode* node = json_array_get_element(json_node_get_array(qr_result), 0);
     GValue val = G_VALUE_INIT;
     json_node_get_value(node, &val);
     rhythmdb_entry_set(db, entry, rhythmdb_prop, &val);
@@ -239,34 +233,34 @@ static void rb_deezer_source_add_track(RBDeezerSource* deezer_source,
     char stream_url[255];
     snprintf(stream_url, 255, "dzmedia:///track/%d", id);
 
+    JsonObject* artist_obj = json_object_get_object_member(track_json_obj, "artist");
+    JsonObject* album_obj = json_object_get_object_member(track_json_obj, "album");
+
     // Already got this one
     RhythmDBEntry* entry = rhythmdb_entry_lookup_by_location(db, stream_url);
     if (entry == NULL) {
         entry = rhythmdb_entry_new(db, entry_type, stream_url);
         rb_deezer_source_set_track_component(
-            track_json, 
-            "$.artist.name", 
-            RHYTHMDB_PROP_ARTIST,
+            json_object_get_member(artist_obj, "name"),
+            RHYTHMDB_PROP_ARTIST, 
             db, entry
         );
 
         rb_deezer_source_set_track_component(
-            track_json, 
-            "$.title", 
+            json_object_get_member(track_json_obj, "title"),
             RHYTHMDB_PROP_TITLE,
             db, entry
         );
 
+        // Deezer returns us, Rhythmbox expects ns
         rb_deezer_source_set_track_component(
-            track_json, 
-            "$.duration", 
+            json_object_get_member(track_json_obj, "duration"),
             RHYTHMDB_PROP_DURATION,
             db, entry
         );
 
         rb_deezer_source_set_track_component(
-            track_json, 
-            "$.album.cover", 
+            json_object_get_member(album_obj, "cover"),
             RHYTHMDB_PROP_MUSICBRAINZ_ALBUMID,
             db, entry
         );

@@ -169,8 +169,9 @@ static void rb_shell_player_volume_changed_cb (RBPlayer *player,
 					       float volume,
 					       RBShellPlayer *shell_player);
 
-static void rb_shell_player_switch_players(RBShellPlayer *player,
-							 RhythmDBEntry *entry);
+static gboolean rb_shell_player_switch_players(RBShellPlayer *player,
+							 RhythmDBEntry *entry,
+							 GError** error);
 
 static void 
 rb_shell_player_signal_connect_player(RBShellPlayer *shell_player, 
@@ -339,13 +340,16 @@ rb_shell_player_open_playlist_url (RBShellPlayer *player,
 	rb_debug ("playing stream url %s", location);
 
 	// Check if we've got a custom player supplied for this entry
-	rb_shell_player_switch_players(player, entry);
+	rb_shell_player_switch_players(player, entry, &error);
+	
+	if (error == NULL) {
+		rb_player_open (player->priv->active_player,
+				location,
+				rhythmdb_entry_ref (entry),
+				(GDestroyNotify) rhythmdb_entry_unref,
+				&error);
+	}
 
-	rb_player_open (player->priv->active_player,
-			location,
-			rhythmdb_entry_ref (entry),
-			(GDestroyNotify) rhythmdb_entry_unref,
-			&error);
 	if (error == NULL)
 		rb_player_play (player->priv->active_player, play_type, player->priv->track_transition_time, &error);
 
@@ -767,7 +771,8 @@ rb_shell_player_open_location (RBShellPlayer *player,
 
 		rhythmdb_entry_ref (entry);
 
-		rb_shell_player_switch_players(player, entry);
+		// Need to switch players sometimes
+		ret = ret && rb_shell_player_switch_players(player, entry, error);
 		ret = ret && rb_player_open (player->priv->active_player, location, entry, (GDestroyNotify) rhythmdb_entry_unref, error);
 		ret = ret && rb_player_play (player->priv->active_player, play_type, player->priv->track_transition_time, error);
 	}
@@ -2984,24 +2989,31 @@ rb_shell_player_add_custom_player(RBShellPlayer *player,
  * Switches the currently active RBPlayer instance for a custom implementation
  * if required by entry
  */ 
-static void 
+static gboolean
 rb_shell_player_switch_players(RBShellPlayer *player,
-							 RhythmDBEntry *entry) {
+							 RhythmDBEntry *entry, 
+							 GError** error) {
 	RhythmDBEntryType *entry_type = rhythmdb_entry_get_entry_type(entry);
-	RBPlayer* player_switch = RB_PLAYER(g_hash_table_lookup(player->priv->custom_players, entry_type));
-	if (player_switch == NULL) {
+	gpointer newplayer_ptr = g_hash_table_lookup(player->priv->custom_players, entry_type);
+	RBPlayer* player_switch = NULL;
+	if (newplayer_ptr != NULL) {
+		player_switch = RB_PLAYER(newplayer_ptr);
+	} else {
 		player_switch = player->priv->default_player;
 	}
 
 	// No need to switch
 	if (player_switch == player->priv->active_player) {
 		rb_debug ("No need to switch players");
-		return;
+		return true;
 	}
 
-	rb_debug ("Switching players %p", player_switch);
-	// rb_player_close(player->priv->active_player, NULL, NULL);
-	player->priv->active_player = player_switch;
+	if (rb_player_close (player->priv->active_player, NULL, error)) {
+		rb_debug ("Switching players %p", player_switch);
+		player->priv->active_player = player_switch;
+	}
+
+	return error == NULL;
 }
 
 static void

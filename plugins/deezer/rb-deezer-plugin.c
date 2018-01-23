@@ -32,13 +32,14 @@ static void rb_deezer_plugin_access_token_changed(RBDeezerPlugin* pl,
 	char* access_token;
 	g_object_get(pl, "access-token", &access_token, NULL);
 	if (strlen(access_token) > 0) {
-		rb_debug("Access token received, passing to Deezer");
+		rb_debug("Access token received, passing to Deezer connect handle %p", pl->handle);
 		dz_error_t err = dz_connect_set_access_token(pl->handle, NULL, NULL, access_token);
 		if (err != DZ_ERROR_NO_ERROR) {
 			rb_debug("Error setting access token in Deezer lib %d", err);
 		}
 
-		err = dz_connect_offline_mode(pl->handle, NULL, NULL, true);
+		// Force online operation to ensure we're logged in
+		err = dz_connect_offline_mode(pl->handle, NULL, NULL, false);
 		if (err != DZ_ERROR_NO_ERROR) {
 			rb_debug("Error forcing online mode after access token receipt %d", err);
 		}
@@ -126,14 +127,14 @@ G_DEFINE_DYNAMIC_TYPE_EXTENDED(
 					 			peas_activatable_iface_init)
 );
 
-static void dz_connect_event_cb(dz_connect_handle handle,
+static void rb_deezer_plugin_connect_event_cb(dz_connect_handle handle,
 								dz_connect_event_handle event,
 								void* user_data) {
 	RBDeezerPlugin* plugin = RB_DEEZER_PLUGIN(user_data);
-	rb_debug("CONNECT EVENT ON PLUGIN %p", plugin);
+	rb_debug("CONNECT EVENT plugin %p", plugin);
 }
 
-static bool dz_crash_reporting_cb() {
+static bool rb_deezer_plugin_crash_reporting_cb() {
 	rb_debug("DEEZER HAS CRASHED O NOES");
 	return false;
 }
@@ -171,20 +172,30 @@ static void impl_activate (PeasActivatable* pl) {
     RhythmDB* db;
 	RBShellPlayer* shell_player;
 	g_object_get (plugin, "object", &shell, NULL);
-    g_object_get (shell, "db", &db, NULL);
-	g_object_get (shell, "shell_player", &shell_player, NULL);
+    g_object_get (shell, 
+		"db", &db, 
+		"shell_player", &shell_player,
+		NULL);	
 
 	// Open connection to deezer api
 	char* cache_file = rb_find_user_cache_file("dz_cache");
 	struct dz_connect_configuration config; 
+	memset(&config, 0, sizeof(struct dz_connect_configuration));
 	config.app_id = APP_ID;
-	config.product_id = "Java_player";
-	config.product_build_id = "0.0.1";
+	config.product_id = "Javaplayer";
+	config.product_build_id = "00001";
 	config.user_profile_path = cache_file;
-	config.app_has_crashed_delegate = dz_crash_reporting_cb;
-	config.connect_event_cb = dz_connect_event_cb;
+	config.app_has_crashed_delegate = rb_deezer_plugin_crash_reporting_cb;
+	config.connect_event_cb = rb_deezer_plugin_connect_event_cb;
+
 	plugin->handle = dz_connect_new(&config);
-	dz_error_t err = dz_connect_activate(plugin->handle, NULL);
+	if (plugin->handle == NULL) {
+		rb_debug("Failed to create connect handle");
+	}
+
+	rb_debug("Connected to deezer, device_id %s", dz_connect_get_device_id(plugin->handle));
+
+	dz_error_t err = dz_connect_activate(plugin->handle, plugin);
 	if (err != DZ_ERROR_NO_ERROR) {
 		rb_debug("Error connecting to deezer %d", err);
 	}
