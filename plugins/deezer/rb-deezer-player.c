@@ -33,10 +33,12 @@ struct _RBDeezerPlayer {
 
     // Current state
     RBDeezerPlayerState state;
-    gboolean play_pending; // Should start playing once loaded?
-    gboolean stream_ready;
     int64_t progress_micros;
     float volume;
+
+    // Things that can happen in the future
+    gboolean play_pending;
+    gboolean stream_ready;
 };
 
 static void rb_deezer_player_destroy_stream_data(RBDeezerPlayer* deezer_player) {
@@ -45,6 +47,28 @@ static void rb_deezer_player_destroy_stream_data(RBDeezerPlayer* deezer_player) 
     }
     deezer_player->stream_data = NULL;
     deezer_player->stream_data_destroy = NULL;
+}
+
+static gboolean rb_deezer_player_check_error(const char* desc, dz_error_t err, GError** gerror) {
+    if (err != DZ_ERROR_NO_ERROR) {
+        g_set_error(gerror, 
+            RB_PLAYER_ERROR, 
+            RB_PLAYER_ERROR_GENERAL,
+            "%s: %d", desc, err
+        );
+    }
+    return err == DZ_ERROR_NO_ERROR;
+}
+
+static gboolean rb_deezer_player_check_error_emit(RBDeezerPlayer* deezer_player, const char* desc, dz_error_t err) {
+    GError* gerror;
+    if (rb_deezer_player_check_error(desc, err, &gerror)) {
+        return true;
+    } else {
+        _rb_player_emit_error(RB_PLAYER(deezer_player), deezer_player->stream_data, gerror);
+        g_error_free(gerror);
+        return false;
+    }
 }
 
 static gboolean rb_deezer_player_open(RBPlayer *player,
@@ -60,23 +84,18 @@ static gboolean rb_deezer_player_open(RBPlayer *player,
     deezer_player->stream_data_destroy = stream_data_destroy;
 
     dz_error_t err = dz_player_load(deezer_player->player_handle, NULL, NULL, uri);
-    if (err != DZ_ERROR_NO_ERROR) {
-        rb_debug("Error opening track %d", err);
-        g_set_error(error, 
-            RB_PLAYER_ERROR, 
-            RB_PLAYER_ERROR_GENERAL,
-            "Failed to load from Deezer: %d", err
-        );
-    } else {
+    if (rb_deezer_player_check_error("Error opening track", err, error)) {
         deezer_player->state = RB_DZ_PLAYER_LOADING;
+        return true;
+    } else {
+        return false;
     }
-
-    return err == DZ_ERROR_NO_ERROR;
 }
 
 static gboolean rb_deezer_player_opened(RBPlayer *player) {
-    rb_debug("Unimplemented!!!");
-    return false;
+    RBDeezerPlayer* deezer_player = RB_DEEZER_PLAYER(player);
+    return deezer_player->state == RB_DZ_PLAYER_PLAYING 
+        || deezer_player->state == RB_DZ_PLAYER_PAUSED;
 }
 
 static gboolean rb_deezer_player_close(RBPlayer *player,
@@ -84,16 +103,13 @@ static gboolean rb_deezer_player_close(RBPlayer *player,
                                         GError **error) {
     RBDeezerPlayer* deezer_player = RB_DEEZER_PLAYER(player);
     dz_error_t err = dz_player_stop(deezer_player->player_handle, NULL, NULL);
-    if (err != DZ_ERROR_NO_ERROR) {
-        g_set_error(error, 
-            RB_PLAYER_ERROR, 
-            RB_PLAYER_ERROR_GENERAL,
-            "Error stopping: %d", err
-        );
-    } else {
+    if (rb_deezer_player_check_error("Error stopping", err, error)) {
         deezer_player->state = RB_DZ_PLAYER_STOPPED;
+        rb_deezer_player_destroy_stream_data(deezer_player);
+        return true;
+    } else {
+        return false;
     }
-    return err == DZ_ERROR_NO_ERROR;
 }
 
 static gboolean rb_deezer_player_actually_play(RBDeezerPlayer* deezer_player, GError** error) {
@@ -104,18 +120,13 @@ static gboolean rb_deezer_player_actually_play(RBDeezerPlayer* deezer_player, GE
         DZ_INDEX_IN_QUEUELIST_CURRENT
     );
 
-    if (err != DZ_ERROR_NO_ERROR) {
-        rb_debug("Errror code from play %d", err);
-        g_set_error(error, 
-            RB_PLAYER_ERROR, 
-            RB_PLAYER_ERROR_GENERAL, 
-            "Failed to play track: %d", err
-        );
-    } else {
+    if (rb_deezer_player_check_error("Error playing track", err, error)) {
         deezer_player->state = RB_DZ_PLAYER_PLAYING;
         _rb_player_emit_playing_stream(RB_PLAYER(deezer_player), deezer_player->stream_data);
+        return true;
+    } else {
+        return false;
     }
-    return err == DZ_ERROR_NO_ERROR;
 }
 
 static gboolean	rb_deezer_player_play(RBPlayer *player,
@@ -124,12 +135,21 @@ static gboolean	rb_deezer_player_play(RBPlayer *player,
                                         GError **error) {
     RBDeezerPlayer* deezer_player = RB_DEEZER_PLAYER(player);
     if (deezer_player->state == RB_DZ_PLAYER_PAUSED) {
+        // No need to load just call resume
         dz_error_t err = dz_player_resume(deezer_player->player_handle, NULL, NULL);
-        return err == DZ_ERROR_NO_ERROR;
+        if (rb_deezer_player_check_error("Error resuming", err, error)) {
+            deezer_player->state = RB_DZ_PLAYER_PLAYING;
+            _rb_player_emit_playing_stream(RB_PLAYER(deezer_player), deezer_player->stream_data);
+            return true;
+        } else {
+            return false;
+        }
     } else if (deezer_player->stream_ready) {
+        // We've already loaded the tracks, go go go 
         deezer_player->stream_ready = false;
         return rb_deezer_player_actually_play(deezer_player, error);
     } else {
+        // We'll start playing once the stream is loaded
         deezer_player->play_pending = true;
         return true;
     }
@@ -138,9 +158,7 @@ static gboolean	rb_deezer_player_play(RBPlayer *player,
 static void rb_deezer_player_pause(RBPlayer *player) {
     RBDeezerPlayer* deezer_player = RB_DEEZER_PLAYER(player);
     dz_error_t err = dz_player_pause(deezer_player->player_handle, NULL, NULL);
-    if (err != DZ_ERROR_NO_ERROR) {
-        rb_debug("Error pausing %d", err);
-    } else {
+    if (rb_deezer_player_check_error_emit(deezer_player, "Error pausing", err)) {
         deezer_player->state = RB_DZ_PLAYER_PAUSED;
     }
 }
@@ -173,11 +191,15 @@ static gboolean rb_deezer_player_seekable(RBPlayer *player) {
     return true;
 }
 
-static void rb_deezer_player_set_time(RBPlayer *player, gint64 newtime_seconds) {
+static void rb_deezer_player_set_time(RBPlayer *player, gint64 newtime_nanos) {
+    rb_debug("Seek called with new time %ld", newtime_nanos);
     RBDeezerPlayer* deezer_player = RB_DEEZER_PLAYER(player);
-    dz_error_t err = dz_player_seek(deezer_player->player_handle, NULL, NULL, newtime_seconds * 1000000); // seconds -> us
-    if (err != DZ_ERROR_NO_ERROR) {
-        rb_debug("Error seeking %d", err);
+    dz_error_t err = dz_player_seek(deezer_player->player_handle, NULL, NULL, newtime_nanos / 1000); // ns -> us
+    if (rb_deezer_player_check_error_emit(deezer_player, "Error seeking", err)) {
+        // Documentation says we go into pause mode if we were originally not already playing or paused
+        if (deezer_player->state == RB_DZ_PLAYER_STOPPED) {
+            deezer_player->state = RB_DZ_PLAYER_PAUSED;
+        }
     }
 }
 
@@ -185,23 +207,6 @@ static gint64 rb_deezer_player_get_time(RBPlayer *player) {
     RBDeezerPlayer* deezer_player = RB_DEEZER_PLAYER(player);
     return deezer_player->progress_micros;
 }
-
-static void rb_player_init(RBPlayerIface *iface) {
-    iface->open = rb_deezer_player_open;
-	iface->opened = rb_deezer_player_opened;
-	iface->close = rb_deezer_player_close;
-	iface->play = rb_deezer_player_play;
-	iface->pause = rb_deezer_player_pause;
-	iface->playing = rb_deezer_player_playing;
-	iface->set_volume = rb_deezer_player_set_volume;
-	iface->get_volume = rb_deezer_player_get_volume;
-	iface->seekable = rb_deezer_player_seekable;
-	iface->set_time = rb_deezer_player_set_time;
-	iface->get_time = rb_deezer_player_get_time;
-	iface->multiple_open = (RBPlayerFeatureFunc) rb_false_function;
-}
-
-static void rb_deezer_player_init(RBDeezerPlayer* player) {}
 
 static const char* rb_deezer_player_event_type_desc(dz_player_event_t event_type) {
     switch (event_type) {
@@ -246,6 +251,26 @@ static const char* rb_deezer_player_event_type_desc(dz_player_event_t event_type
     }
 }
 
+static void rb_deezer_player_queuelist_loaded_cb(RBDeezerPlayer* deezer_player) {
+    rb_debug("Queuelist loaded");
+    if (deezer_player->play_pending) {
+        deezer_player->play_pending = false;
+        GError* err;
+        if (!rb_deezer_player_actually_play(deezer_player, &err)) {
+            _rb_player_emit_error(RB_PLAYER(deezer_player), deezer_player->stream_data, err);
+            g_error_free(err);
+        }
+    } else {
+        deezer_player->stream_ready = true;
+    }
+}
+
+static void rb_deezer_player_track_end_cb(RBDeezerPlayer* deezer_player) {
+    rb_debug("Track end");
+    deezer_player->state = RB_DZ_PLAYER_STOPPED;
+    _rb_player_emit_eos(RB_PLAYER(deezer_player), deezer_player->stream_data, false);
+}
+
 struct _player_event_args {
     RBDeezerPlayer* deezer_player;
     dz_player_event_handle event_handle;
@@ -257,23 +282,13 @@ static gboolean rb_deezer_player_event_cb_main(gpointer data) {
     dz_player_event_handle event = args->event_handle;
     free(data);
 
-    // RBDeezerPlayer* deezer_player = RB_DEEZER_PLAYER(user_data);
     dz_player_event_t event_type = dz_player_event_get_type(event);
     switch (event_type) {
         case DZ_PLAYER_EVENT_RENDER_TRACK_END:
-            rb_debug("Handling track end");
-            deezer_player->state = RB_DZ_PLAYER_STOPPED;
-            _rb_player_emit_eos(RB_PLAYER(deezer_player), deezer_player->stream_data, false);
+            rb_deezer_player_track_end_cb(deezer_player);
             break;
         case DZ_PLAYER_EVENT_QUEUELIST_LOADED:
-            rb_debug("Queuelist loaded");
-            if (deezer_player->play_pending) {
-                deezer_player->play_pending = false;
-                GError* err;
-                rb_deezer_player_actually_play(deezer_player, &err);
-            } else {
-                deezer_player->stream_ready = true;
-            }
+            rb_deezer_player_queuelist_loaded_cb(deezer_player);
             break;
         default:
             rb_debug("Unhandled event %s", rb_deezer_player_event_type_desc(event_type));
@@ -333,7 +348,7 @@ static void rb_deezer_player_constructed(GObject* object) {
     
     dz_player_set_event_cb(player->player_handle, rb_deezer_player_event_cb);
     
-    dz_player_set_render_progress_cb(player->player_handle, rb_deezer_player_onrenderprogress_cb, 1000000); // 1 sec
+    dz_player_set_render_progress_cb(player->player_handle, rb_deezer_player_onrenderprogress_cb, 100000); // 100 ms
 
     dz_error_t err = dz_player_activate(player->player_handle, player);
     if (err != DZ_ERROR_NO_ERROR) {
@@ -366,6 +381,23 @@ static void get_property (GObject *object, guint prop_id, GValue *value, GParamS
     }
 }
 
+static void rb_player_init(RBPlayerIface *iface) {
+    iface->open = rb_deezer_player_open;
+	iface->opened = rb_deezer_player_opened;
+	iface->close = rb_deezer_player_close;
+	iface->play = rb_deezer_player_play;
+	iface->pause = rb_deezer_player_pause;
+	iface->playing = rb_deezer_player_playing;
+	iface->set_volume = rb_deezer_player_set_volume;
+	iface->get_volume = rb_deezer_player_get_volume;
+	iface->seekable = rb_deezer_player_seekable;
+	iface->set_time = rb_deezer_player_set_time;
+	iface->get_time = rb_deezer_player_get_time;
+	iface->multiple_open = (RBPlayerFeatureFunc) rb_false_function;
+}
+
+static void rb_deezer_player_init(RBDeezerPlayer* player) {}
+
 static void rb_deezer_player_class_init(RBDeezerPlayerClass* class) {
     GObjectClass* object_class =  G_OBJECT_CLASS(class);
     object_class->get_property = get_property;
@@ -381,9 +413,7 @@ static void rb_deezer_player_class_init(RBDeezerPlayerClass* class) {
     );
 }
 
-static void rb_deezer_player_class_finalize(RBDeezerPlayerClass* class) {
-    
-}
+static void rb_deezer_player_class_finalize(RBDeezerPlayerClass* class) {}
 
 G_DEFINE_DYNAMIC_TYPE_EXTENDED(
     RBDeezerPlayer,

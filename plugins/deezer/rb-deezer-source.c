@@ -354,7 +354,7 @@ static void rb_deezer_source_show_search(RBDeezerSource* deezer_source) {
     RBEntryView* ev = rb_entry_view_new(
         db,
         G_OBJECT(shell_player),
-        false, 
+        true, 
         false 
     );
     rb_entry_view_append_column(ev, RB_ENTRY_VIEW_COL_TITLE, true);
