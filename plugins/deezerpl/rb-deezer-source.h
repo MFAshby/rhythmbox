@@ -21,8 +21,6 @@ G_DECLARE_FINAL_TYPE(
 
 void _rb_deezer_source_register_type (GTypeModule *type_module);
 
-void rb_deezer_source_setup(RBDeezerSource*);
-
 G_END_DECLS
 
 #endif

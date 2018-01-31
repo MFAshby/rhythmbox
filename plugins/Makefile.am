@@ -66,5 +66,5 @@ SUBDIRS += android
 endif
 
 if ENABLE_DEEZER
-SUBDIRS += deezer
+SUBDIRS += deezerpl
 endif

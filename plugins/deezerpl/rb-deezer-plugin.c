@@ -227,7 +227,6 @@ static void impl_activate (PeasActivatable* pl) {
 		RB_DISPLAY_PAGE(source), 
 		RB_DISPLAY_PAGE(group)
 	);
-	rb_deezer_source_setup(source);
 
 	// Connect the two
 	rb_shell_register_entry_type_for_source(
@@ -304,6 +303,7 @@ void rb_deezer_plugin_api_call(RBDeezerPlugin* pl,
 	va_start(list, endpoint);
 	for (char* key = va_arg(list, char*); key != NULL; key = va_arg(list, char*)) {
 		char* value = va_arg(list, char*);
+		rb_debug("About to put in map %s, %s", key, value);
 		g_hash_table_insert(query_params, key, value);
 	}
 	va_end(list);
