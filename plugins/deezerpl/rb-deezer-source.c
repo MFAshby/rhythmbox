@@ -204,6 +204,9 @@ static void rb_deezer_source_set_tracks(RBDeezerSource* deezer_source,
         );
     }
 
+    // Set the model as the property on RBSource so that auto moving to next works
+    g_object_set(RB_SOURCE(deezer_source), "query-model", model, NULL);
+
     rb_entry_view_set_model(deezer_source->entry_view, model);
 
     g_object_unref(shell);
