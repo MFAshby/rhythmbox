@@ -11,10 +11,6 @@
 
 #include <glib/gi18n-lib.h>
 
-enum {
-	RB_DEEZER_PLUGIN_PROP_ACCESS_TOKEN = 2 // Property 1 is object
-};
-
 static void rb_deezer_plugin_init (RBDeezerPlugin *);
 static void impl_activate (PeasActivatable* );
 static void impl_deactivate	(PeasActivatable *plugin);
@@ -23,45 +19,47 @@ static void get_property (GObject *object, guint prop_id, GValue *value, GParamS
 static void rb_deezer_plugin_class_init (RBDeezerPluginClass *klass);
 static void rb_deezer_plugin_class_finalize (RBDeezerPluginClass *klass);
 static void peas_activatable_iface_init (PeasActivatableInterface *iface);
-static void load_access_token_file(RBDeezerPlugin* plugin);
-static void save_access_token_file(RBDeezerPlugin* plugin);
 
-static void rb_deezer_plugin_access_token_changed(RBDeezerPlugin* pl, 
-												GParamSpec* property, 
-												gpointer data) {
-	char* access_token;
-	g_object_get(pl, "access-token", &access_token, NULL);
-	if (strlen(access_token) > 0) {
-		rb_debug("Access token received, passing to Deezer connect handle %p", pl->handle);
-		dz_error_t err = dz_connect_set_access_token(pl->handle, NULL, NULL, access_token);
-		if (err != DZ_ERROR_NO_ERROR) {
-			rb_debug("Error setting access token in Deezer lib %d", err);
-		}
 
-		// Force online operation to ensure we're logged in
-		err = dz_connect_offline_mode(pl->handle, NULL, NULL, false);
-		if (err != DZ_ERROR_NO_ERROR) {
-			rb_debug("Error forcing online mode after access token receipt %d", err);
-		}
+static void rb_deezer_plugin_access_token_changed(GSettings* settings, 
+												  gchar* key,
+												  gpointer user_data) {
+	RBDeezerPlugin* pl = RB_DEEZER_PLUGIN(user_data);
+	gchar* access_token = g_settings_get_string(pl->settings, "access-token");
+	if (strlen(access_token) == 0) {
+		rb_debug("Access token is empty");
+		return;
+	}
 
-		save_access_token_file(pl);
+	rb_debug("Access token received, passing to Deezer connect handle %p", pl->handle);
+	dz_error_t err = dz_connect_set_access_token(pl->handle, NULL, NULL, access_token);
+	if (err != DZ_ERROR_NO_ERROR) {
+		rb_debug("Error setting access token in Deezer lib %d", err);
+	}
+
+	// Force online operation to ensure we're logged in
+	err = dz_connect_offline_mode(pl->handle, NULL, NULL, false);
+	if (err != DZ_ERROR_NO_ERROR) {
+		rb_debug("Error forcing online mode after access token receipt %d", err);
 	}
 }
 
 static void rb_deezer_plugin_init (RBDeezerPlugin *plugin) {
 	rb_debug ("Deezer plugin init");
-	plugin->access_token = "";
+
+	plugin->settings = g_settings_new(G_SETTINGS_SCHEMA);
+
 	g_signal_connect(
-		plugin, 
-		"notify::access-token", G_CALLBACK(rb_deezer_plugin_access_token_changed), 
-		NULL
+		plugin->settings, 
+		"changed::access-token", G_CALLBACK(rb_deezer_plugin_access_token_changed), 
+		plugin
 	);
 
 	plugin->soup_session = soup_session_new();
 }
 
 static void set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec) {			
-	RBDeezerPlugin* deezer_plugin = RB_DEEZER_PLUGIN(object);
+	// RBDeezerPlugin* deezer_plugin = RB_DEEZER_PLUGIN(object);
 	switch (prop_id) {						
 	case PROP_OBJECT:						
 		g_object_set_data_full (object,
@@ -69,9 +67,6 @@ static void set_property (GObject *object, guint prop_id, const GValue *value, G
 					g_value_dup_object (value),
 					g_object_unref);
 		break;
-	case RB_DEEZER_PLUGIN_PROP_ACCESS_TOKEN:
-		deezer_plugin->access_token = g_value_dup_string(value);
-		break;	
 	default:							
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;						
@@ -79,13 +74,10 @@ static void set_property (GObject *object, guint prop_id, const GValue *value, G
 }
 
 static void get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec) {									
-	RBDeezerPlugin* deezer_plugin = RB_DEEZER_PLUGIN(object);
+	// RBDeezerPlugin* deezer_plugin = RB_DEEZER_PLUGIN(object);
 	switch (prop_id) {				
 	case PROP_OBJECT:
 		g_value_set_object(value, g_object_get_data (object, "rb-shell")); 
-		break;
-	case RB_DEEZER_PLUGIN_PROP_ACCESS_TOKEN:
-		g_value_set_string(value, deezer_plugin->access_token);
 		break;	
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -101,18 +93,6 @@ static void rb_deezer_plugin_class_init (RBDeezerPluginClass *klass) {
 	g_object_class_override_property (
 		object_class, 
 		PROP_OBJECT, "object"
-	);
-
-	g_object_class_install_property(
-		object_class,
-		RB_DEEZER_PLUGIN_PROP_ACCESS_TOKEN, 
-		g_param_spec_string(
-			"access-token", 
-			"Access token", 
-			"Access token for deezer API", 
-			"", 
-			G_PARAM_READWRITE
-		)
 	);
 }
 
@@ -137,32 +117,6 @@ static void rb_deezer_plugin_connect_event_cb(dz_connect_handle handle,
 static bool rb_deezer_plugin_crash_reporting_cb() {
 	rb_debug("DEEZER HAS CRASHED O NOES");
 	return false;
-}
-
-static void save_access_token_file(RBDeezerPlugin* plugin) {
-	char* access_tok_file_path = rb_find_user_data_file("dz_access_token");
-	const gchar* access_token;
-	g_object_get(plugin, "access-token", &access_token, NULL);
-	if (strlen(access_token) > 0) {
-		GError* err = NULL;
-		if (!g_file_set_contents(access_tok_file_path, access_token, -1, &err)) {
-			rb_debug("Error saving access token to %s", err->message);
-		} else {
-			rb_debug("Saved access token to %s", access_tok_file_path);
-		}
-	}
-}
-
-static void load_access_token_file(RBDeezerPlugin* plugin) {
-	char* access_tok_file_path = rb_find_user_data_file("dz_access_token");
-	gchar* access_token;
-	GError* error = NULL;
-	if (g_file_get_contents(access_tok_file_path, &access_token, NULL, &error)) {
-		rb_debug("Loaded access token from file %s", access_token);
-		g_object_set(plugin, "access-token", access_token, NULL);
-	} else {
-		rb_debug("Error loading access token %s", error->message);
-	}
 }
 
 static void impl_activate (PeasActivatable* pl) {
@@ -200,8 +154,8 @@ static void impl_activate (PeasActivatable* pl) {
 		rb_debug("Error connecting to deezer %d", err);
 	}
 
-	// Try to load the access token
-	load_access_token_file(plugin);
+	// Try to apply access token now if we have one already
+	rb_deezer_plugin_access_token_changed(NULL, NULL, plugin);
 
     // Install DeezerEntryType
 	RBDeezerEntryType* entry_type = g_object_new(
@@ -303,13 +257,13 @@ void rb_deezer_plugin_api_call(RBDeezerPlugin* pl,
 	va_start(list, endpoint);
 	for (char* key = va_arg(list, char*); key != NULL; key = va_arg(list, char*)) {
 		char* value = va_arg(list, char*);
-		rb_debug("About to put in map %s, %s", key, value);
 		g_hash_table_insert(query_params, key, value);
 	}
 	va_end(list);
 
-	if (strlen(pl->access_token) > 0) {
-		g_hash_table_insert(query_params, "access_token", (char*)pl->access_token);
+	gchar* access_token = g_settings_get_string(pl->settings, "access-token");
+	if (strlen(access_token) > 0) {
+		g_hash_table_insert(query_params, "access_token", access_token);
 	}
 
 	soup_uri_set_query_from_form(uri, query_params);

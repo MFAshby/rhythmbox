@@ -431,4 +431,14 @@
       <description>Access key for the web remote control interface</description>
     </key>
   </schema>
+
+  <!-- Deezer settings. Need some way of keeping these to the plugin folder -->
+  <schema id="org.gnome.rhythmbox.plugins.deezer" path="/org/gnome/rhythmbox/plugins/deezerpl/">
+    <key name="access-token" type="s">
+      <default>""</default>
+      <summary>The access token for Deezer API</summary>
+      <description>The token for accessing paid Deezer API functionality. Issued via OAUTH.</description>
+    </key>
+  </schema>
+
 </schemalist>

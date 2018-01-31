@@ -14,15 +14,16 @@
 #include "rb-plugin-macros.h"
 #include "rb-deezer-source.h"
 
+#define G_SETTINGS_SCHEMA "org.gnome.rhythmbox.plugins.deezer"
 #define APP_ID "264662"
 
 G_BEGIN_DECLS
 
 struct _RBDeezerPlugin {
 	PeasExtensionBase parent;
-	const gchar* access_token;
 	dz_connect_handle handle;
 	SoupSession* soup_session;
+	GSettings* settings;
 };
 
 G_DECLARE_FINAL_TYPE(
@@ -43,6 +44,7 @@ void rb_deezer_plugin_api_call(RBDeezerPlugin* pl,
 							  void* user_data, 
 							  char* endpoint, 
 							  ... /* Parameters: key, value, key2, value2 */);
+
 
 G_END_DECLS
 

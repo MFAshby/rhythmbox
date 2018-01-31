@@ -14,8 +14,6 @@ libdeezerpl_la_SOURCES = \
   rb-deezer-player.h \
   rb-deezer-entry-type.h \
   rb-deezer-entry-type.c \
-  rb-deezer-login.h \
-  rb-deezer-login.c \
   yuarel.c \
   yuarel.h
   
@@ -43,20 +41,12 @@ AM_CPPFLAGS = \
   $(RHYTHMBOX_CFLAGS) \
   $(DEEZER_CFLAGS) \
   -D_DEFAULT_SOURCE \
-  -std=c11 \
-  -Wno-error=unused-function
+  -std=c11
 
 plugin_in_files = deezer.plugin.in
 %.plugin: %.plugin.in $(INTLTOOL_MERGE) $(wildcard $(top_srcdir)/po/*po) ; $(INTLTOOL_MERGE) $(top_srcdir)/po $< $@ -d -u -c $(top_builddir)/po/.intltool-merge-cache
 
 plugin_DATA = $(plugin_in_files:.plugin.in=.plugin)
-
-gtkbuilderdir = $(plugindatadir)
-gtkbuilder_DATA =	# search-ui.ui	
-	
-
-EXTRA_DIST = $(plugin_in_files) \
-  $(gtkbuilder_DATA)
-
+EXTRA_DIST = $(plugin_in_files)
 CLEANFILES = $(plugin_DATA)
 DISTCLEANFILES = $(plugin_DATA)
