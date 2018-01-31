@@ -19,6 +19,7 @@
         "deezer-player.h": "c",
         "deezer-connect.h": "c",
         "deezer-track.h": "c",
-        "json-glib.h": "c"
+        "json-glib.h": "c",
+        "deezer-offline.h": "c"
     }
 }
