@@ -3005,15 +3005,16 @@ rb_shell_player_switch_players(RBShellPlayer *player,
 	// No need to switch
 	if (player_switch == player->priv->active_player) {
 		rb_debug ("No need to switch players");
-		return true;
+		return TRUE;
 	}
 
 	if (rb_player_close (player->priv->active_player, NULL, error)) {
 		rb_debug ("Switching players %p", player_switch);
 		player->priv->active_player = player_switch;
+		return TRUE;
+	} else {
+		return FALSE;
 	}
-
-	return error == NULL;
 }
 
 static void
