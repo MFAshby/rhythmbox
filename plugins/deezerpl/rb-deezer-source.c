@@ -581,6 +581,7 @@ static void rb_deezer_source_update_page(RBDeezerSource* deezer_source) {
         gtk_notebook_set_current_page(deezer_source->notebook, deezer_source->notebook_tab_search);
     } else {
         gtk_notebook_set_current_page(deezer_source->notebook, deezer_source->notebook_tab_login);
+        webkit_web_view_load_uri(deezer_source->login_web_view, OAUTH_URL);
     }
 }
 
@@ -633,9 +634,43 @@ static void rb_deezer_source_link_signals(RBDeezerSource* deezer_source) {
 	);
 }
 
+static void rb_deezer_source_logout_pressed(GtkButton* button, gpointer user_data) {
+    RBDeezerSource* deezer_source = RB_DEEZER_SOURCE(user_data);
+    rb_debug("Clearing Deezer access token");
+    g_settings_set_string(deezer_source->settings, "access-token", "");
+}
+
+
+static void rb_deezer_source_update_logout_sensitive(GSettings* settings, gchar* key, gpointer user_data) {
+    gchar* access_token = g_settings_get_string(settings, "access-token");
+    gboolean is_logged_in = strlen(access_token) > 0;
+    gtk_widget_set_sensitive(GTK_WIDGET(user_data), is_logged_in);
+}
+
+/**
+ * Preferences page just lets you log out in case you want to switch accounts
+ */ 
 static GtkWidget* rb_deezer_source_get_config_widget(RBDisplayPage *page, RBShellPreferences *prefs) {
-    // Gtk
-    return NULL;
+    RBDeezerSource* deezer_source = RB_DEEZER_SOURCE(page);
+    GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget* logout_button = gtk_button_new_with_label(_("Log out of Deezer"));
+
+    g_signal_connect(
+        logout_button, 
+        "clicked", 
+        G_CALLBACK(rb_deezer_source_logout_pressed), 
+        page
+    );
+
+    rb_deezer_source_update_logout_sensitive(deezer_source->settings, NULL, logout_button);
+    g_signal_connect(
+        deezer_source->settings, 
+        "changed::access-token", 
+        G_CALLBACK(rb_deezer_source_update_logout_sensitive), 
+        logout_button
+    );
+    gtk_box_pack_start(GTK_BOX(box), logout_button, false, false, 4);
+    return box;
 }
 
 /*************** Login stuff *********************************/
@@ -697,6 +732,12 @@ static void rb_deezer_source_web_view_load_changed(WebKitWebView* wv,
     if (access_token != NULL) {
         rb_debug("Got access token");
         g_settings_set_string(deezer_source->settings, "access-token", access_token);
+
+        // Get away from the redirect page now we've retrieved the token
+        webkit_web_view_load_uri(wv, "google.com"); 
+        // Clear all the cookies so if the user presses log out they have to log in again.
+        WebKitWebsiteDataManager* man = webkit_web_view_get_website_data_manager(wv);
+        webkit_website_data_manager_clear(man, WEBKIT_WEBSITE_DATA_ALL, 0, NULL, NULL, NULL);
     }
 
     char* error_reason = query_val("error_reason", u.query);
