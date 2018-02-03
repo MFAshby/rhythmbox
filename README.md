@@ -18,6 +18,9 @@ see https://github.com/deezer/native-sdk-samples/issues/23)
 ```
 sudo apt install libssl1.0.0
 ```
+NB if this package isn't available, you'll have to find it elsewhere. 
+I had to take it from an older version of debian.
+https://packages.debian.org/jessie/amd64/libssl1.0.0/download
 
 Download the source code
 ```
