@@ -38,8 +38,7 @@ sudo tar xf plugins/deezerpl/libdeezer.tgz -C /
 
 Build & install - change the j parameter for your number of CPU cores
 ```
-autoreconf -i
-./configure
+./autogen.sh
 make -j8
 sudo make install
 ```
