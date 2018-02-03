@@ -42,3 +42,11 @@ Build & install - change the j parameter for your number of CPU cores
 make -j8
 sudo make install
 ```
+
+If you want to run from the build directory for development & debugging:
+```
+./configure --enable-uninstalled-build
+make -j8
+shell/rhythmbox
+```
+My VS code configuration is included in this repository if that's what you're using
