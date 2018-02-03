@@ -76,7 +76,8 @@
                     "/usr/include/x86_64-linux-gnu",
                     "/usr/include",
                     "${workspaceRoot}",
-                    "/usr/include/glib-2.0"
+                    "/usr/include/glib-2.0",
+                    "/usr/include/gtk-3.0"
                 ],
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": ""

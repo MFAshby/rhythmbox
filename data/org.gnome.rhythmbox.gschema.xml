@@ -439,6 +439,11 @@
       <summary>The access token for Deezer API</summary>
       <description>The token for accessing paid Deezer API functionality. Issued via OAUTH.</description>
     </key>
+    <key name="cache-size-kb" type="u">
+      <default>50000</default>
+      <summary>The maximum cache size in KB Deezer will use</summary>
+      <description>Deezer caches tracks locally. This settings determines how much space it is allowed.</description>
+    </key>
   </schema>
 
 </schemalist>

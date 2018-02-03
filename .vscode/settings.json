@@ -20,6 +20,10 @@
         "deezer-connect.h": "c",
         "deezer-track.h": "c",
         "json-glib.h": "c",
-        "deezer-offline.h": "c"
+        "deezer-offline.h": "c",
+        "rb-deezer-offline-source.h": "c",
+        "rb-deezer-offline-entry-type.h": "c",
+        "type_traits": "c",
+        "rb-debug.h": "c"
     }
 }

@@ -4,6 +4,7 @@
 #include <gtk/gtk.h>
 #include <glib/gi18n-lib.h>
 #include <deezer-track.h>
+#include <deezer-offline.h>
 #include <json-glib/json-glib.h>
 #include <webkit2/webkit2.h>
 
@@ -19,6 +20,7 @@
 #include "rb-play-order.h"
 #include "rb-display-page.h"
 #include "yuarel.h"
+#include "rb-builder-helpers.h"
 
 #define OAUTH_URL "https://connect.deezer.com/oauth/auth.php?"\
                 "app_id=" APP_ID\
@@ -55,6 +57,7 @@ struct _RBDeezerSource {
 
     // Search page
     RBSearchEntry* search_entry;
+    GtkSwitch* offline_mode_switch;
     RBEntryView* entry_view;
     GtkTreeView* artist_tree_view;
     GtkTreeView* album_tree_view;
@@ -71,9 +74,13 @@ struct _RBDeezerSource {
     gulong signal_handler_artist_activated;
     gulong signal_handler_album_activated;
     gulong signal_handler_access_token_change;
+    gulong signal_handler_offline_mode_switch;
 
     // Login page
     WebKitWebView* login_web_view;
+
+    // Popup menu
+    GMenuModel* popup_menu_model;
 };
 
 /// Hoist the function definitions me hearties
@@ -108,7 +115,7 @@ RBEntryView* rb_deezer_source_get_entry_view (RBSource *source) {
  * Copy a value onto a RhythmDBEntry from a JsonNode
  */ 
 static void rb_deezer_source_set_track_component(JsonNode* node,
-                                                 guint rhythmdb_prop,
+                                                 RhythmDBPropType rhythmdb_prop,
                                                  RhythmDB* db,
                                                  RhythmDBEntry* entry) {
     GValue val = G_VALUE_INIT;
@@ -155,6 +162,20 @@ static void rb_deezer_source_add_track(RBDeezerSource* deezer_source,
 
     if (entry == NULL) {
         entry = rhythmdb_entry_new(db, entry_type, stream_url);
+
+        {
+            // I'm abusing the musicbrainz ID to store the Deezer ID
+            // this code could probably be shorter somehow
+            char buf[100];
+            snprintf(buf, 100, "%d", id);
+            GValue val = G_VALUE_INIT;
+            g_value_init(&val, G_TYPE_STRING);
+            g_value_set_string(&val, buf);
+            rhythmdb_entry_set(db, entry, RHYTHMDB_PROP_MUSICBRAINZ_TRACKID, &val);
+            g_value_unset(&val);
+        }
+        
+
         rb_deezer_source_set_track_component(
             json_object_get_member(artist_obj, "name"),
             RHYTHMDB_PROP_ARTIST, 
@@ -240,10 +261,6 @@ static void rb_deezer_source_set_tracks(RBDeezerSource* deezer_source,
     g_object_unref(db);
 }
 
-/**
- * Notebook with 2 tabs (not user selectable)
- * 
- */ 
 static void rb_deezer_source_create_ui(RBDeezerSource* deezer_source) {
     RBShell* shell;
     RBShellPlayer* shell_player;
@@ -258,6 +275,10 @@ static void rb_deezer_source_create_ui(RBDeezerSource* deezer_source) {
 
     // Search bar
     RBSearchEntry* se = rb_search_entry_new(false);
+
+    // Offline mode switch
+    GtkSwitch* offline_mode_switch = GTK_SWITCH(gtk_switch_new());
+    GtkLabel* offline_mode_label = GTK_LABEL(gtk_label_new(_("Offline mode")));
 
     // EntryView shows track listings
     RBEntryView* ev = rb_entry_view_new(
@@ -312,7 +333,6 @@ static void rb_deezer_source_create_ui(RBDeezerSource* deezer_source) {
     // WebView for login
     WebKitWebView* login_web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
     webkit_web_view_load_uri(login_web_view, OAUTH_URL);
-    g_signal_connect(login_web_view, "load-changed", G_CALLBACK(rb_deezer_source_web_view_load_changed), deezer_source);
 
     // Put the property views in a H box 
     GtkBox* box_prop_views = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
@@ -326,10 +346,16 @@ static void rb_deezer_source_create_ui(RBDeezerSource* deezer_source) {
     gtk_paned_add1(paned, GTK_WIDGET(box_prop_views));
     gtk_paned_add2(paned, GTK_WIDGET(ev));
 
+    // Ptu search bar and offline switch in h box
+    GtkBox* search_and_offline = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+    gtk_box_pack_start(search_and_offline, GTK_WIDGET(se), false, true, 0);
+    gtk_box_pack_start(search_and_offline, GTK_WIDGET(offline_mode_label), false, false, 0);
+    gtk_box_pack_start(search_and_offline, GTK_WIDGET(offline_mode_switch), false, false, 0);
+
     // Put everything on the search page into a v box
     GtkBox* box_search = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
     gtk_box_pack_end(box_search, GTK_WIDGET(paned), true, true, 0);
-    gtk_box_pack_end(box_search, GTK_WIDGET(se), false, true, 0);
+    gtk_box_pack_end(box_search, GTK_WIDGET(search_and_offline), false, true, 0);
 
     // Put the search and login on tabs of a notebook, but hide the tabs
     // as we'll be switching programatically
@@ -357,6 +383,7 @@ static void rb_deezer_source_create_ui(RBDeezerSource* deezer_source) {
     deezer_source->notebook = notebook;
     deezer_source->notebook_tab_login = notebook_tab_login;
     deezer_source->notebook_tab_search = notebook_tab_search;
+    deezer_source->offline_mode_switch = offline_mode_switch;
 
     g_object_unref(shell);
     g_object_unref(db);
@@ -592,6 +619,86 @@ static void rb_deezer_source_access_token_change_cb(GSettings* settings,
     rb_deezer_source_update_page(deezer_source);
 }
 
+static void rb_deezer_source_offline_mode_switch(GObject    *gobject,
+                                                 GParamSpec *pspec,
+                                                 gpointer    user_data) {
+    RBDeezerSource* deezer_source = RB_DEEZER_SOURCE(user_data);
+    RBDeezerPlugin* plugin;
+    g_object_get(deezer_source, "plugin", &plugin, NULL);
+    gboolean offline_mode = gtk_switch_get_active(deezer_source->offline_mode_switch);
+
+	dz_error_t err = dz_connect_offline_mode(plugin->handle, NULL, NULL, offline_mode);
+	if (err != DZ_ERROR_NO_ERROR) {
+		rb_debug("Error forcing setting offline mode to %d: %d", offline_mode, err);
+	}
+
+    // Switch the search to only look for online stuff eh
+
+    g_object_unref(plugin);
+}
+
+static void rb_deezer_source_show_popup(RBEntryView* entry_view,
+                                        gboolean over_entry,
+                                        RBDeezerSource* deezer_source)
+{
+	if (!over_entry) {
+        return;
+    }
+
+    if (deezer_source->popup_menu_model == NULL) {
+        RBDeezerPlugin* plugin;
+        g_object_get(deezer_source, "plugin", &plugin, NULL);
+
+        GtkBuilder* builder = rb_builder_load_plugin_file(G_OBJECT(plugin), "deezer-popup.ui", NULL);
+        deezer_source->popup_menu_model = G_MENU_MODEL(gtk_builder_get_object(builder, "deezer-popup"));
+        g_object_ref(deezer_source->popup_menu_model);
+        g_object_unref(plugin);
+        g_object_unref(builder);
+    }
+
+    GtkMenu* menu = GTK_MENU(gtk_menu_new_from_model(deezer_source->popup_menu_model));
+    // This line is important for some shitty reason
+    gtk_menu_attach_to_widget (GTK_MENU (menu), GTK_WIDGET (deezer_source), NULL);
+	gtk_menu_popup(menu,
+			NULL,
+			NULL,
+			NULL,
+			NULL,
+			3,
+			gtk_get_current_event_time());
+}
+
+static void rb_deezer_source_save_offline_entry(RhythmDBEntry* entry,
+                                                RBDeezerSource* deezer_source) {
+    const char* track_id = rhythmdb_entry_get_string(entry, RHYTHMDB_PROP_MUSICBRAINZ_TRACKID);
+    char path[100];
+    snprintf(path, 100, "/dzlocal/tracklist/track/%s", track_id);
+
+    char tracklist[100];
+    snprintf(tracklist, 100, "{ \"tracks\" : [ %s ] }", track_id);
+
+    rb_debug("Requesting offline sync path [%s] content [%s]", path, tracklist);
+    dz_error_t err = dz_offline_synchronize(deezer_source->plugin->handle, 
+        NULL, 
+        NULL, 
+        path, 
+        "0",
+        tracklist
+    );
+
+    if (err != DZ_ERROR_NO_ERROR) {
+        rb_debug("Error requesting offline sync %s", dz_error_string(err));
+    }
+}
+
+static void rb_deezer_source_save_offline_cb(GSimpleAction *action, 
+                                             GVariant *parameter, 
+                                             gpointer data) {
+    RBDeezerSource* deezer_source = RB_DEEZER_SOURCE(data);
+    GList* selected = rb_entry_view_get_selected_entries(deezer_source->entry_view);
+    g_list_foreach(selected, (GFunc)rb_deezer_source_save_offline_entry, deezer_source);
+}
+
 /**
  * Connect up the UI elements to things they need to do
  * Keep references to the signal handlers in case we need to stop them for some reason
@@ -632,6 +739,39 @@ static void rb_deezer_source_link_signals(RBDeezerSource* deezer_source) {
 		"changed::access-token", G_CALLBACK(rb_deezer_source_access_token_change_cb), 
 		deezer_source
 	);
+
+    g_signal_connect(deezer_source->login_web_view, 
+        "load-changed", 
+        G_CALLBACK(rb_deezer_source_web_view_load_changed), 
+        deezer_source
+    );
+
+    deezer_source->signal_handler_offline_mode_switch = g_signal_connect(deezer_source->offline_mode_switch,
+        "notify::active", 
+        G_CALLBACK(rb_deezer_source_offline_mode_switch),
+        deezer_source
+    );
+
+    g_signal_connect(deezer_source->entry_view,
+        "show_popup",
+        G_CALLBACK(rb_deezer_source_show_popup), 
+        deezer_source
+    );
+
+    // Popup menu actions
+    // This is fucking infuriating
+    GActionEntry actions[] = {
+		{ "save-deezer-offline", rb_deezer_source_save_offline_cb, NULL, NULL, NULL }
+	};
+
+    RBShell* shell;
+    g_object_get(deezer_source, "shell", &shell, NULL);
+    // It's important to use this method, fuck knows why
+    _rb_add_display_page_actions (G_ACTION_MAP (g_application_get_default ()),
+				      G_OBJECT (shell),
+				      actions,
+				      G_N_ELEMENTS (actions));
+    g_object_unref(shell);
 }
 
 static void rb_deezer_source_logout_pressed(GtkButton* button, gpointer user_data) {
@@ -674,7 +814,6 @@ static GtkWidget* rb_deezer_source_get_config_widget(RBDisplayPage *page, RBShel
 }
 
 /*************** Login stuff *********************************/
-
 static char* query_val(const char* key, char* querystr) {
     if (querystr == NULL) {
         return NULL;
@@ -749,35 +888,6 @@ static void rb_deezer_source_web_view_load_changed(WebKitWebView* wv,
 }
 
 /*************** Boilerplatey class stuff ********************/
-static void rb_deezer_source_get_property(GObject* object, 
-                                        guint property_id, 
-                                        GValue* value, 
-                                        GParamSpec* pspec) {
-    RBDeezerSource* deezer_source = RB_DEEZER_SOURCE(object);
-    switch (property_id) {
-        case RB_DEEZER_SOURCE_PROP_PLUGIN:
-            g_value_set_object(value, deezer_source->plugin);
-            break;
-        default:
-            G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
-            break;
-    }
-}
-
-static void rb_deezer_source_set_property(GObject* object, 
-                                        guint property_id, 
-                                        const GValue* value, 
-                                        GParamSpec* pspec) {
-    RBDeezerSource* deezer_source = RB_DEEZER_SOURCE(object);
-    switch (property_id) {
-        case RB_DEEZER_SOURCE_PROP_PLUGIN:
-            deezer_source->plugin = g_value_get_object(value);
-            break;
-        default:
-            G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
-            break;
-    }
-}
 
 static void rb_deezer_source_init(RBDeezerSource* src) {
     src->settings = g_settings_new(G_SETTINGS_SCHEMA);
@@ -796,8 +906,6 @@ static void rb_deezer_source_constructed(GObject* src) {
 
 static void rb_deezer_source_class_init(RBDeezerSourceClass* cls) {
     GObjectClass* obj_class = G_OBJECT_CLASS(cls);
-    obj_class->set_property = rb_deezer_source_set_property;
-    obj_class->get_property = rb_deezer_source_get_property;
     obj_class->constructed = rb_deezer_source_constructed;
 
     // Override methods
@@ -806,16 +914,6 @@ static void rb_deezer_source_class_init(RBDeezerSourceClass* cls) {
 
     RBDisplayPageClass* display_page_class = RB_DISPLAY_PAGE_CLASS(cls);
     display_page_class->get_config_widget = rb_deezer_source_get_config_widget;
-
-    g_object_class_install_property(
-        obj_class, 
-        RB_DEEZER_SOURCE_PROP_PLUGIN, 
-        g_param_spec_object(
-            "plugin", "Plugin", "plugin", 
-            rb_deezer_plugin_get_type(), 
-            G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE
-        )
-    );
 }
 
 static void rb_deezer_source_class_finalize(RBDeezerSourceClass* cls) {}

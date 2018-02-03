@@ -70,6 +70,11 @@ GType		rb_browser_source_get_type		(void);
 
 gboolean	rb_browser_source_has_drop_support	(RBBrowserSource *source);
 
+// MFA define auto-ptr cleanup so I can inherit from this using the most 
+// convenient macros. Don't actually need to implement.
+void rb_browser_source_autoptr_cleanup(RBBrowserSource*);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(RBBrowserSource, rb_browser_source_autoptr_cleanup);
+
 G_END_DECLS
 
 #endif /* __RB_BROWSER_SOURCE_H */

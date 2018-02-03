@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<interface>
+  <menu id="deezer-popup">
+    <section>
+      <item>
+        <attribute name="label" translatable="yes">Save offline</attribute>
+        <attribute name="action">app.save-deezer-offline</attribute>
+      </item>
+    </section>
+  </menu>
+</interface>

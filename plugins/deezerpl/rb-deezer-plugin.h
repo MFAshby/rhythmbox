@@ -14,6 +14,12 @@
 #include "rb-plugin-macros.h"
 #include "rb-deezer-source.h"
 
+// I always want to check & log the return value of deezer API functions
+#define DZ(function, ...)  dz_error_t err = (function)(__VA_ARGS__); \
+	if (err != DZ_ERROR_NO_ERROR) { \
+		rb_debug("Error with (function) %s", dz_error_string(err)); \
+	} \
+
 #define G_SETTINGS_SCHEMA "org.gnome.rhythmbox.plugins.deezer"
 #define APP_ID "264662"
 
@@ -24,6 +30,7 @@ struct _RBDeezerPlugin {
 	dz_connect_handle handle;
 	SoupSession* soup_session;
 	GSettings* settings;
+	gboolean offline_available;
 };
 
 G_DECLARE_FINAL_TYPE(
@@ -45,6 +52,7 @@ void rb_deezer_plugin_api_call(RBDeezerPlugin* pl,
 							  char* endpoint, 
 							  ... /* Parameters: key, value, key2, value2 */);
 
+const char* dz_error_string(dz_error_t err);
 
 G_END_DECLS
 

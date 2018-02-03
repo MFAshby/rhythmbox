@@ -15,7 +15,11 @@ libdeezerpl_la_SOURCES = \
   rb-deezer-entry-type.h \
   rb-deezer-entry-type.c \
   yuarel.c \
-  yuarel.h
+  yuarel.h \
+  rb-deezer-offline-source.h \
+  rb-deezer-offline-source.c \
+  rb-deezer-offline-entry-type.h \
+  rb-deezer-offline-entry-type.c
   
 libdeezerpl_la_LDFLAGS = $(PLUGIN_LIBTOOL_FLAGS) 
 libdeezerpl_la_LIBTOOLFLAGS = --tag=disable-static
@@ -46,7 +50,12 @@ AM_CPPFLAGS = \
 plugin_in_files = deezer.plugin.in
 %.plugin: %.plugin.in $(INTLTOOL_MERGE) $(wildcard $(top_srcdir)/po/*po) ; $(INTLTOOL_MERGE) $(top_srcdir)/po $< $@ -d -u -c $(top_builddir)/po/.intltool-merge-cache
 
+gtkbuilderdir = $(plugindatadir)
+gtkbuilder_DATA =	\
+		deezer-popup.ui
+
 plugin_DATA = $(plugin_in_files:.plugin.in=.plugin)
-EXTRA_DIST = $(plugin_in_files)
+EXTRA_DIST = $(plugin_in_files) \
+  $(gtkbuilder_DATA)
 CLEANFILES = $(plugin_DATA)
 DISTCLEANFILES = $(plugin_DATA)
